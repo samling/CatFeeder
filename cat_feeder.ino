@@ -78,6 +78,9 @@ void setup()
   server.begin();
 
   servo.attach(A0);
+  // Initialize servo in a stopped state
+  // (midpoint of 1000-2000 range); should
+  // be 1500 but not quite calibrated
   servo.write(1480);
 }
 
@@ -157,15 +160,7 @@ void loop()
   ClickEncoder::Button b = encoder->getButton();
   if (b != ClickEncoder::Open) {
     #define VERBOSECASE(label) case label: lcd.selectLine(1); lcd.print(#label); break;
-    if (b == ClickEncoder::Clicked) {
-      if (feeding == 0) {
-        servo.write(1000);
-        feeding = 1;
-      } else {
-        servo.write(1480);
-        feeding = 0;
-      }
-    }
+
     switch (b) {
       VERBOSECASE(ClickEncoder::Pressed);
       VERBOSECASE(ClickEncoder::Held);
@@ -175,6 +170,15 @@ void loop()
         encoder->setAccelerationEnabled(!encoder->getAccelerationEnabled());
         Serial.print("Acceleration is:");
         Serial.println(encoder->getAccelerationEnabled() ? "enabled" : "disabled");
+        break;
+      case ClickEncoder::Clicked:
+        if (feeding == 0) {
+          servo.write(1000);
+          feeding = 1;
+        } else {
+          servo.write(1480);
+          feeding = 0;
+        }
         break;
       }
   }
