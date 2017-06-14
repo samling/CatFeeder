@@ -1,6 +1,5 @@
 #include <ArduinoJson.h>
 #include <ServoTimer2.h>
-#include <ClickEncoder.h>
 #include <DS1307RTC.h>
 #include <EthernetV2_0.h>
 #include <EthernetUdpV2_0.h>         // UDP library from: bjoern@cs.stanford.edu 12/30/2008
@@ -14,16 +13,8 @@
 
 #define PRINT_USA_DATE
 
-#define dpInEncoderA 2
-#define dpInEncoderB 3
-#define dpInEncoderPress 4
-
 #define SQW_INPUT_PIN A4   // Input pin to read SQW
 #define SQW_OUTPUT_PIN 13 // LED to indicate SQW's state
-
-// Initialize encoder
-ClickEncoder *encoder;
-int16_t encLast, encValue;
 
 // Interrupt for alerts
 bool alert = 0;
@@ -33,11 +24,6 @@ static int8_t lastSecond = -1;
 
 // State of the servo (0 = off, 1 = on)
 bool feeding = 0;
-
-// Encoder needs to run timer interrupt service routine once every millisecond
-void timerIsr() {
-  encoder->service();
-}
 
 // Set network connection details
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
@@ -122,16 +108,6 @@ void setup()
   // Initialize serial connection
   Serial.begin(9600);
 
-  // Set up the encoder
-  encoder = new ClickEncoder(dpInEncoderA, dpInEncoderB, dpInEncoderPress);
-  
-  // Initialize timer for processing encoder interrupts and attach the timer interrupt service routine
-  Timer1.initialize(1000);
-  Timer1.attachInterrupt(timerIsr);
-
-  // Initialize the last state of the encoder as -1
-  encLast = -1;
-  
   // Set up the clock
   pinMode(SQW_INPUT_PIN, INPUT_PULLUP);
   pinMode(SQW_OUTPUT_PIN, OUTPUT);
@@ -220,59 +196,10 @@ void loop()
   // Update RC data including seconds, minutes, etc.
   rtc.update();
   rtc.set24Hour();
-  
-//  // Read encoder value
-//  encValue += encoder->getValue();
-//  if (encValue != encLast) {
-//    encLast = encValue;
-//    lcd.clear();
-//    lcd.selectLine(1);
-//    lcd.print("Encoder Value:");
-//    lcd.selectLine(2);
-//    lcd.print(encValue);
-//  }
 
   // Show the date and time unless there's an alert message
   if (alert == 0) {
     showDateTime(lastSecond);
-  }
-
-  // Process encoder button actions
-  ClickEncoder::Button b = encoder->getButton();
-  if (b != ClickEncoder::Open) {
-    #define VERBOSECASE(label) case label: lcd.selectLine(1); lcd.print(#label); break;
-
-    switch (b) {
-      VERBOSECASE(ClickEncoder::Pressed);
-      VERBOSECASE(ClickEncoder::Held);
-      VERBOSECASE(ClickEncoder::Released);
-      case ClickEncoder::DoubleClicked:
-        Serial.println("ClickEncoder::DoubleClicked");
-        encoder->setAccelerationEnabled(!encoder->getAccelerationEnabled());
-        Serial.print("Acceleration is:");
-        Serial.println(encoder->getAccelerationEnabled() ? "enabled" : "disabled");
-        break;
-      case ClickEncoder::Clicked:
-        if (feeding == 0) {
-          alert = 1;
-          
-          displayTwoLineMessage("CONTINUOUS", "FEED");
-          
-          servo.attach(A0);
-          servo.write(2000);
-          
-          feeding = 1;
-        } else {
-          alert = 0;
-                    
-          clearLCD();
-          
-          servo.detach();
-          
-          feeding = 0;
-        }
-        break;
-      }
   }
 
   // Read the state of the SQW pin and show it on the
