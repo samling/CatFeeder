@@ -21,11 +21,15 @@
 #define SQW_INPUT_PIN A4   // Input pin to read SQW
 #define SQW_OUTPUT_PIN 13 // LED to indicate SQW's state
 
-#define SERVO_MIDPOINT 1480
-
 // Initialize encoder
 ClickEncoder *encoder;
 int16_t encLast, encValue;
+
+// Interrupt for alerts
+bool alert = 0;
+
+// Set a test value for the clock
+static int8_t lastSecond = -1;
 
 // State of the servo (0 = off, 1 = on)
 bool feeding = 0;
@@ -52,11 +56,63 @@ void displayAccelerationStatus() {
   lcd.print(encoder->getAccelerationEnabled() ? "on" : "off");
 }
 
-void instantFeed(int portionSize) {
-  Serial.println("Instant feed cycle");
-  servo.write(portionSize);
-  delay(2000);
-  servo.write(SERVO_MIDPOINT);
+void displayTwoLineMessage(String line1, String line2) {
+  lcd.selectLine(1);
+  lcd.clearLine(1);
+  lcd.print(line1);
+  lcd.selectLine(2);
+  lcd.clearLine(2);
+  lcd.print(line2);
+}
+
+void clearLCD() {
+  lcd.clearLine(1);
+  lcd.clearLine(2);
+}
+
+// Manually initiate a feed cycle using portionSize as the delay time
+void manualFeed(long portionSize) {
+  if (portionSize > 5000) {
+    portionSize = 5000;
+  }
+  alert = 1;
+
+  // Convert portionSize into a time in seconds
+  char buff[2];
+  sprintf(buff, "%.5ld", portionSize);
+  char withDot[3];
+  withDot[0] = buff[1];
+  withDot[1] = '.';
+  withDot[2] = buff[2];
+  withDot[3] = '\0';
+
+  displayTwoLineMessage("MANUAL FEED", "T:" + String(withDot) + "s");
+   
+  servo.attach(A0);
+  servo.write(2000);
+  delay(portionSize);
+  servo.detach();
+
+  clearLCD();
+  alert = 0;
+}
+
+// Display the date and time on the LCD
+void showDateTime(int8_t lastSecond) {
+  if (rtc.second() != lastSecond) {
+    lcd.selectLine(1);
+    lcd.clearLine(1);
+    lcd.print(String(rtc.hour()) + ":");
+    if(rtc.minute() < 10) { lcd.print(String("0")); }
+    lcd.print(String(rtc.minute()) + ":");
+    if(rtc.second() < 10) { lcd.print(String("0")); }
+    lcd.print(String(rtc.second()));
+    delay(1000);
+  }
+
+  lcd.selectLine(2);
+  lcd.clearLine(2);
+  lcd.print(String(rtc.month()) + "/" + String(rtc.day()) + "/" + String(rtc.year()));
 }
 
 void setup()
@@ -88,18 +144,10 @@ void setup()
   Ethernet.begin(mac, ip);
   Serial.println(Ethernet.localIP());
   server.begin();
-
-  servo.attach(A0);
-  // Initialize servo in a stopped state
-  // (midpoint of 1000-2000 range); should
-  // be 1500 but not quite calibrated
-  servo.write(SERVO_MIDPOINT);
 }
 
 void loop()
 {  
-  static int8_t lastSecond = -1;
-
   EthernetClient client = server.available();
   if (client) {
     boolean currentLineIsBlank = true;
@@ -129,7 +177,7 @@ void loop()
           int portionSize = root["portionSize"];
 
           // Manual feed with prespecified portion size (really a delay between start and stop of the auger)
-          instantFeed(portionSize);
+          manualFeed(portionSize);
           Serial.println(portionSize);
 
           // Send a response to the client
@@ -182,30 +230,20 @@ void loop()
   int mo = rtc.month();
   int yr = rtc.year();
   
-//  if (rtc.second() != lastSecond) {
+//  // Read encoder value
+//  encValue += encoder->getValue();
+//  if (encValue != encLast) {
+//    encLast = encValue;
+//    lcd.clear();
 //    lcd.selectLine(1);
-//    lcd.clearLine(1);
-//    lcd.print(String(rtc.hour()) + ":");
-//    if(rtc.minute() < 10) { lcd.print(String("0")); }
-//    lcd.print(String(rtc.minute()) + ":");
-//    if(rtc.second() < 10) { lcd.print(String("0")); }
-//    lcd.print(String(rtc.second()));
-//    delay(1000);
+//    lcd.print("Encoder Value:");
+//    lcd.selectLine(2);
+//    lcd.print(encValue);
 //  }
 
-  //lcd.selectLine(2);
-  //lcd.clearLine(2);
-  //lcd.print(String(rtc.month()) + "/" + String(rtc.day()) + "/" + String(rtc.year()));
-  
-  // Read encoder value
-  encValue += encoder->getValue();
-  if (encValue != encLast) {
-    encLast = encValue;
-    lcd.clear();
-    lcd.selectLine(1);
-    lcd.print("Encoder Value:");
-    lcd.selectLine(2);
-    lcd.print(encValue);
+  // Show the date and time unless there's an alert message
+  if (alert == 0) {
+    showDateTime(lastSecond);
   }
 
   // Process encoder button actions
@@ -224,11 +262,23 @@ void loop()
         Serial.println(encoder->getAccelerationEnabled() ? "enabled" : "disabled");
         break;
       case ClickEncoder::Clicked:
+        Serial.println("Clicked");
         if (feeding == 0) {
-          servo.write(1000);
+          alert = 1;
+          
+          displayTwoLineMessage("CONTINUOUS", "FEED");
+          
+          servo.attach(A0);
+          servo.write(2000);
+          
           feeding = 1;
         } else {
-          servo.write(SERVO_MIDPOINT);
+          alert = 0;
+                    
+          clearLCD();
+          
+          servo.detach();
+          
           feeding = 0;
         }
         break;
