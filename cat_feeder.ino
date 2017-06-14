@@ -102,7 +102,9 @@ void showDateTime(int8_t lastSecond) {
   if (rtc.second() != lastSecond) {
     lcd.selectLine(1);
     lcd.clearLine(1);
-    lcd.print(String(rtc.hour()) + ":");
+    int adjustedHour = (rtc.hour() - 14 > 0 ? rtc.hour() - 14 : rtc.hour() + 10);
+    if(adjustedHour < 10) { lcd.print(String("0")); }
+    lcd.print(String(adjustedHour) + ":");
     if(rtc.minute() < 10) { lcd.print(String("0")); }
     lcd.print(String(rtc.minute()) + ":");
     if(rtc.second() < 10) { lcd.print(String("0")); }
@@ -178,10 +180,9 @@ void loop()
 
           // Manual feed with prespecified portion size (really a delay between start and stop of the auger)
           manualFeed(portionSize);
-          Serial.println(portionSize);
 
           // Send a response to the client
-          client.println("HTTP/1.0 200 OK");
+          client.println("HTTP/1.1 200 OK");
           client.println("Content-Type: application/json");
           client.println();
           client.println("{\"result\":\"success\"}");
@@ -191,7 +192,7 @@ void loop()
           while (client.available()) {
             Serial.write(client.read());
           }
-          client.println("HTTP/1.0 200 OK");
+          client.println("HTTP/1.1 200 OK");
           client.println("Content-Type: text/html");
           client.println();
           client.println("<HTML><BODY>POST TEST OK!</BODY></HTML>");
@@ -200,7 +201,7 @@ void loop()
           while (client.available()) {
             Serial.write(client.read());
           }
-          client.println("HTTP/1.0 404 NOT FOUND");
+          client.println("HTTP/1.1 404 NOT FOUND");
           client.println("Content-Type: text/html");
           client.println();
           client.println("<HTML><BODY>Page not found</BODY></HTML>");
@@ -218,17 +219,7 @@ void loop()
 
   // Update RC data including seconds, minutes, etc.
   rtc.update();
-
-  // Read the time:
-  int s = rtc.second();
-  int m = rtc.minute();
-  int h = rtc.hour();
-  
-  // Read the day/date:
-  int dy = rtc.day();
-  int da = rtc.date();
-  int mo = rtc.month();
-  int yr = rtc.year();
+  rtc.set24Hour();
   
 //  // Read encoder value
 //  encValue += encoder->getValue();
@@ -262,7 +253,6 @@ void loop()
         Serial.println(encoder->getAccelerationEnabled() ? "enabled" : "disabled");
         break;
       case ClickEncoder::Clicked:
-        Serial.println("Clicked");
         if (feeding == 0) {
           alert = 1;
           
