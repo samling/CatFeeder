@@ -85,6 +85,35 @@ void loop()
 {  
   static int8_t lastSecond = -1;
 
+  EthernetClient client = server.available();
+  if (client) {
+    Serial.println("Client");
+    boolean currentLineIsBlank = true;
+    while (client.connected()) {
+      while (client.available()) {
+        char c = client.read();
+        Serial.write(c);
+  
+        if (c == '\n' && currentLineIsBlank) {
+          while (client.available()) {
+            Serial.write(client.read());
+          }
+          client.println("HTTP/1.0 200 OK");
+          client.println("Content-Type: text/html");
+          client.println();
+          client.println("<HTML><BODY>TEST OK!</BODY></HTML>");
+          client.stop();
+        }
+        else if (c == '\n') {
+          currentLineIsBlank = true;
+        }
+        else if (c != '\r') {
+          currentLineIsBlank = false;
+        }
+      }
+    }
+  }
+
   // Update RC data including seconds, minutes, etc.
   rtc.update();
 
