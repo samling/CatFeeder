@@ -1,3 +1,4 @@
+#include <ArduinoJson.h>
 #include <ServoTimer2.h>
 #include <ClickEncoder.h>
 #include <DS1307RTC.h>
@@ -20,12 +21,16 @@
 #define SQW_INPUT_PIN A4   // Input pin to read SQW
 #define SQW_OUTPUT_PIN 13 // LED to indicate SQW's state
 
+#define SERVO_MIDPOINT 1480
+
 // Initialize encoder
 ClickEncoder *encoder;
 int16_t encLast, encValue;
 
+// State of the servo (0 = off, 1 = on)
 bool feeding = 0;
 
+// Encoder needs to run timer interrupt service routine once every millisecond
 void timerIsr() {
   encoder->service();
 }
@@ -47,6 +52,13 @@ void displayAccelerationStatus() {
   lcd.print(encoder->getAccelerationEnabled() ? "on" : "off");
 }
 
+void instantFeed(int portionSize) {
+  Serial.println("Instant feed cycle");
+  servo.write(portionSize);
+  delay(2000);
+  servo.write(SERVO_MIDPOINT);
+}
+
 void setup()
 {
   // Initialize serial connection
@@ -55,7 +67,7 @@ void setup()
   // Set up the encoder
   encoder = new ClickEncoder(dpInEncoderA, dpInEncoderB, dpInEncoderPress);
   
-  // Initialize timer for processing encoder interrupts
+  // Initialize timer for processing encoder interrupts and attach the timer interrupt service routine
   Timer1.initialize(1000);
   Timer1.attachInterrupt(timerIsr);
 
@@ -81,7 +93,7 @@ void setup()
   // Initialize servo in a stopped state
   // (midpoint of 1000-2000 range); should
   // be 1500 but not quite calibrated
-  servo.write(1480);
+  servo.write(SERVO_MIDPOINT);
 }
 
 void loop()
@@ -90,23 +102,41 @@ void loop()
 
   EthernetClient client = server.available();
   if (client) {
-    Serial.println("Client");
     boolean currentLineIsBlank = true;
     String req_str = "";
+    String data = "";
+    StaticJsonBuffer<200> jsonBuffer;
+    
     while (client.connected()) {
       while (client.available()) {
+        // Read the client request into a string
         char c = client.read();
         req_str += c;
         Serial.write(c);
   
         if (c == '\n' && currentLineIsBlank && req_str.startsWith("GET")) {
           while (client.available()) {
-            Serial.write(client.read());
+            // Read the request data into a string
+            char d = client.read();
+            data += d;
+            Serial.write(d);
           }
+          Serial.write('\n');
+          
+          // Create a parsable JSON object
+          JsonObject& root = jsonBuffer.parseObject(data);
+          //const char* portionSize = root["portionSize"];
+          int portionSize = root["portionSize"];
+
+          // Manual feed with prespecified portion size (really a delay between start and stop of the auger)
+          instantFeed(portionSize);
+          Serial.println(portionSize);
+
+          // Send a response to the client
           client.println("HTTP/1.0 200 OK");
-          client.println("Content-Type: text/html");
+          client.println("Content-Type: application/json");
           client.println();
-          client.println("<HTML><BODY>GET TEST OK!</BODY></HTML>");
+          client.println("{\"result\":\"success\"}");
           client.stop();
         }
         else if (c == '\n' && currentLineIsBlank && req_str.startsWith("POST")) {
@@ -178,6 +208,7 @@ void loop()
     lcd.print(encValue);
   }
 
+  // Process encoder button actions
   ClickEncoder::Button b = encoder->getButton();
   if (b != ClickEncoder::Open) {
     #define VERBOSECASE(label) case label: lcd.selectLine(1); lcd.print(#label); break;
@@ -197,7 +228,7 @@ void loop()
           servo.write(1000);
           feeding = 1;
         } else {
-          servo.write(1480);
+          servo.write(SERVO_MIDPOINT);
           feeding = 0;
         }
         break;
