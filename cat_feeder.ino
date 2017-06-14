@@ -92,19 +92,40 @@ void loop()
   if (client) {
     Serial.println("Client");
     boolean currentLineIsBlank = true;
+    String req_str = "";
     while (client.connected()) {
       while (client.available()) {
         char c = client.read();
+        req_str += c;
         Serial.write(c);
   
-        if (c == '\n' && currentLineIsBlank) {
+        if (c == '\n' && currentLineIsBlank && req_str.startsWith("GET")) {
           while (client.available()) {
             Serial.write(client.read());
           }
           client.println("HTTP/1.0 200 OK");
           client.println("Content-Type: text/html");
           client.println();
-          client.println("<HTML><BODY>TEST OK!</BODY></HTML>");
+          client.println("<HTML><BODY>GET TEST OK!</BODY></HTML>");
+          client.stop();
+        }
+        else if (c == '\n' && currentLineIsBlank && req_str.startsWith("POST")) {
+          while (client.available()) {
+            Serial.write(client.read());
+          }
+          client.println("HTTP/1.0 200 OK");
+          client.println("Content-Type: text/html");
+          client.println();
+          client.println("<HTML><BODY>POST TEST OK!</BODY></HTML>");
+          client.stop();
+        } else if (c == '\n' && currentLineIsBlank && (!req_str.startsWith("GET") || !req_str.startsWith("POST"))) {
+          while (client.available()) {
+            Serial.write(client.read());
+          }
+          client.println("HTTP/1.0 404 NOT FOUND");
+          client.println("Content-Type: text/html");
+          client.println();
+          client.println("<HTML><BODY>Page not found</BODY></HTML>");
           client.stop();
         }
         else if (c == '\n') {
