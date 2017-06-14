@@ -33,7 +33,7 @@ void timerIsr() {
 // Set network connection details
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 IPAddress ip(192, 168, 1, 66);
-EthernetServer server(6666);
+EthernetServer server(3001);
 
 // Create servo
 ServoTimer2 servo;
