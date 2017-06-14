@@ -13,8 +13,15 @@
 
 #define PRINT_USA_DATE
 
+#define SDCARD_CS 4
+
+#define MOMENTARY 11
+
 #define SQW_INPUT_PIN A4   // Input pin to read SQW
 #define SQW_OUTPUT_PIN 13 // LED to indicate SQW's state
+
+// Button states for momentary switch
+int buttonState, val;
 
 // Interrupt for alerts
 bool alert = 0;
@@ -35,12 +42,6 @@ ServoTimer2 servo;
 
 // Initialize LCD
 serLCD lcd(5);
-
-// Show if the encoder is accelerated (faster turning -> higher increase) or not
-void displayAccelerationStatus() {
-  lcd.clear();
-  lcd.print(encoder->getAccelerationEnabled() ? "on" : "off");
-}
 
 void displayTwoLineMessage(String line1, String line2) {
   lcd.selectLine(1);
@@ -103,10 +104,30 @@ void showDateTime(int8_t lastSecond) {
   lcd.print(String(rtc.month()) + "/" + String(rtc.day()) + "/" + String(rtc.year()));
 }
 
+void showStatus(IPAddress ip) {
+  String address = String(ip[0]) + "." + String(ip[1]) + "." + String(ip[2]) + "." + String(ip[3]);
+  if (address != "0.0.0.0") {
+    displayTwoLineMessage("Connected", address);
+  } else {
+    displayTwoLineMessage("Not Connected!", "");
+  }
+}
+
 void setup()
-{
+{   
   // Initialize serial connection
   Serial.begin(9600);
+
+  // Pull the momentary switch high
+  pinMode(MOMENTARY, INPUT);
+  digitalWrite(MOMENTARY, HIGH);
+
+  // Pull the ethernet shield SD card slot high
+  pinMode(SDCARD_CS, OUTPUT);
+  digitalWrite(SDCARD_CS, HIGH);
+
+  // Read the momentary switch
+  buttonState = digitalRead(MOMENTARY);
 
   // Set up the clock
   pinMode(SQW_INPUT_PIN, INPUT_PULLUP);
@@ -126,6 +147,19 @@ void setup()
 
 void loop()
 {  
+
+   val = digitalRead(MOMENTARY);
+       
+   if (val != buttonState) {
+       if (val == LOW) {
+           Serial.println("Button - low");
+       } else {
+           Serial.println("Button - high");
+       }
+   }
+   
+   buttonState = val;
+  
   EthernetClient client = server.available();
   if (client) {
     boolean currentLineIsBlank = true;
@@ -199,7 +233,8 @@ void loop()
 
   // Show the date and time unless there's an alert message
   if (alert == 0) {
-    showDateTime(lastSecond);
+    //showDateTime(lastSecond);
+    showStatus(Ethernet.localIP());
   }
 
   // Read the state of the SQW pin and show it on the
