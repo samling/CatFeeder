@@ -1,9 +1,12 @@
+#include <ServoTimer2.h>
 #include <ClickEncoder.h>
 #include <DS1307RTC.h>
+#include <EthernetV2_0.h>
+#include <EthernetUdpV2_0.h>         // UDP library from: bjoern@cs.stanford.edu 12/30/2008
 #include <SerLCD.h>
 #include <SoftwareSerial.h>
-#include <Servo.h>
 #include <SparkFunDS1307RTC.h>
+#include <SPI.h>
 #include <Time.h>
 #include <TimerOne.h>
 #include <Wire.h>
@@ -21,17 +24,24 @@
 ClickEncoder *encoder;
 int16_t encLast, encValue;
 
+bool feeding = 0;
+
 void timerIsr() {
   encoder->service();
 }
 
+// Set network connection details
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+IPAddress ip(192, 168, 1, 66);
+EthernetServer server(6666);
+
 // Create servo
-Servo servo;
-int pos = 0;
+ServoTimer2 servo;
 
 // Initialize LCD
 serLCD lcd(5);
 
+// Show if the encoder is accelerated (faster turning -> higher increase) or not
 void displayAccelerationStatus() {
   lcd.clear();
   lcd.print(encoder->getAccelerationEnabled() ? "on" : "off");
@@ -42,26 +52,33 @@ void setup()
   // Initialize serial connection
   Serial.begin(9600);
 
-  // Set up the clock
-  pinMode(SQW_INPUT_PIN, INPUT_PULLUP);
-  pinMode(SQW_OUTPUT_PIN, OUTPUT);
-  digitalWrite(SQW_OUTPUT_PIN, digitalRead(SQW_INPUT_PIN));
-
   // Set up the encoder
-  encoder = new ClickEncoder(dpInEncoderA,dpInEncoderB,dpInEncoderPress);
-
-  // Initialize clock library
-  rtc.begin();
-
-  // Initialize servo
-  //myservo.attach(9);
-
+  encoder = new ClickEncoder(dpInEncoderA, dpInEncoderB, dpInEncoderPress);
+  
   // Initialize timer for processing encoder interrupts
   Timer1.initialize(1000);
   Timer1.attachInterrupt(timerIsr);
 
   // Initialize the last state of the encoder as -1
   encLast = -1;
+  
+  // Set up the clock
+  pinMode(SQW_INPUT_PIN, INPUT_PULLUP);
+  pinMode(SQW_OUTPUT_PIN, OUTPUT);
+  digitalWrite(SQW_OUTPUT_PIN, digitalRead(SQW_INPUT_PIN));
+
+  // Initialize clock library
+  rtc.begin();
+  rtc.writeSQW(SQW_SQUARE_1);
+  rtc.autoTime();
+
+  // Initialize ethernet connection and start a server
+  Ethernet.begin(mac, ip);
+  Serial.println(Ethernet.localIP());
+  server.begin();
+
+  servo.attach(A0);
+  servo.write(1480);
 }
 
 void loop()
@@ -70,7 +87,7 @@ void loop()
 
   // Update RC data including seconds, minutes, etc.
   rtc.update();
-  
+
   // Read the time:
   int s = rtc.second();
   int m = rtc.minute();
@@ -82,20 +99,20 @@ void loop()
   int mo = rtc.month();
   int yr = rtc.year();
   
-  if (rtc.second() != lastSecond) {
-    lcd.selectLine(1);
-    lcd.clearLine(1);
-    lcd.print(String(rtc.hour()) + ":");
-    if(rtc.minute() < 10) { lcd.print(String("0")); }
-    lcd.print(String(rtc.minute()) + ":");
-    if(rtc.second() < 10) { lcd.print(String("0")); }
-    lcd.print(String(rtc.second()));
-    delay(1000);
-  }
+//  if (rtc.second() != lastSecond) {
+//    lcd.selectLine(1);
+//    lcd.clearLine(1);
+//    lcd.print(String(rtc.hour()) + ":");
+//    if(rtc.minute() < 10) { lcd.print(String("0")); }
+//    lcd.print(String(rtc.minute()) + ":");
+//    if(rtc.second() < 10) { lcd.print(String("0")); }
+//    lcd.print(String(rtc.second()));
+//    delay(1000);
+//  }
 
-  lcd.selectLine(2);
-  lcd.clearLine(2);
-  lcd.print(String(rtc.month()) + "/" + String(rtc.day()) + "/" + String(rtc.year()));
+  //lcd.selectLine(2);
+  //lcd.clearLine(2);
+  //lcd.print(String(rtc.month()) + "/" + String(rtc.day()) + "/" + String(rtc.year()));
   
   // Read encoder value
   encValue += encoder->getValue();
@@ -109,30 +126,28 @@ void loop()
   }
 
   ClickEncoder::Button b = encoder->getButton();
-  if (b != ClickEncoder::Open){
-    lcd.clear();
-    lcd.selectLine(1);
-    lcd.print("Button pressed");
-
-    servo.attach(9);
-    for (pos = 0; pos <=180; pos += 1) {
-        servo.write(pos);
-        delay(5);
-    }
-    
+  if (b != ClickEncoder::Open) {
     #define VERBOSECASE(label) case label: lcd.selectLine(1); lcd.print(#label); break;
+    if (b == ClickEncoder::Clicked) {
+      if (feeding == 0) {
+        servo.write(1000);
+        feeding = 1;
+      } else {
+        servo.write(1480);
+        feeding = 0;
+      }
+    }
     switch (b) {
       VERBOSECASE(ClickEncoder::Pressed);
       VERBOSECASE(ClickEncoder::Held);
       VERBOSECASE(ClickEncoder::Released);
-      VERBOSECASE(ClickEncoder::Clicked);
       case ClickEncoder::DoubleClicked:
         Serial.println("ClickEncoder::DoubleClicked");
         encoder->setAccelerationEnabled(!encoder->getAccelerationEnabled());
         Serial.print("Acceleration is:");
         Serial.println(encoder->getAccelerationEnabled() ? "enabled" : "disabled");
         break;
-    }
+      }
   }
 
   // Read the state of the SQW pin and show it on the
