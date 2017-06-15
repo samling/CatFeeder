@@ -33,7 +33,7 @@ RTC_DS1307 rtc;
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
 // Set network connection details
-byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+byte mac[] = { 0xFE, 0xED, 0xFE, 0xED, 0xFE, 0xED };
 IPAddress ip(192, 168, 1, 66);
 EthernetServer server(3001);
 
@@ -261,7 +261,7 @@ void showStatus(IPAddress ip) {
   if (address != "0.0.0.0") {
     displayTwoLineMessage("Connected", address);
   } else {
-    displayTwoLineMessage("Not Connected!", "");
+    displayTwoLineMessage("ERROR:", "Not connected");
   }
 }
 
