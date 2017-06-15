@@ -17,17 +17,11 @@
 #define SDCARD_CS 4
 #define SERVO_PIN 9
 
-#define SQW_INPUT_PIN A4   // Input pin to read SQW
-#define SQW_OUTPUT_PIN 13 // LED to indicate SQW's state
-
 // Button states for momentary switch
 int buttonState, val;
 
 // Interrupt for alerts
 bool alert = 0;
-
-// Set a test value for the clock
-static int8_t lastSecond = -1;
 
 // State of the servo (0 = off, 1 = on)
 bool feeding = 0;
@@ -84,32 +78,6 @@ void manualFeed(long portionSize) {
   alert = 0;
 }
 
-// Display the date and time on the LCD
-void showDateTime(int8_t lastSecond) {
-  if (rtc.second() != lastSecond) {
-    lcd.selectLine(1);
-    lcd.clearLine(1);
-    int adjustedHour = (rtc.hour() - 14 > 0 ? rtc.hour() - 14 : rtc.hour() + 10);
-    if (adjustedHour < 10) {
-      lcd.print(String("0"));
-    }
-    lcd.print(String(adjustedHour) + ":");
-    if (rtc.minute() < 10) {
-      lcd.print(String("0"));
-    }
-    lcd.print(String(rtc.minute()) + ":");
-    if (rtc.second() < 10) {
-      lcd.print(String("0"));
-    }
-    lcd.print(String(rtc.second()));
-    delay(1000);
-  }
-
-  lcd.selectLine(2);
-  lcd.clearLine(2);
-  lcd.print(String(rtc.month()) + "/" + String(rtc.day()) + "/" + String(rtc.year()));
-}
-
 void showStatus(IPAddress ip) {
   String address = String(ip[0]) + "." + String(ip[1]) + "." + String(ip[2]) + "." + String(ip[3]);
   if (address != "0.0.0.0") {
@@ -132,16 +100,6 @@ void setup()
   pinMode(SDCARD_CS, OUTPUT);
   digitalWrite(SDCARD_CS, HIGH);
 
-  // Set up the clock
-  pinMode(SQW_INPUT_PIN, INPUT_PULLUP);
-  pinMode(SQW_OUTPUT_PIN, OUTPUT);
-  digitalWrite(SQW_OUTPUT_PIN, digitalRead(SQW_INPUT_PIN));
-
-  // Initialize clock library
-  rtc.begin();
-  rtc.writeSQW(SQW_SQUARE_1);
-  rtc.autoTime();
-
   // Initialize ethernet connection and start a server
   Ethernet.begin(mac, ip);
   Serial.println(Ethernet.localIP());
@@ -150,6 +108,22 @@ void setup()
 
 void loop()
 {
+
+  val = digitalRead(MOMENTARY_PIN);
+
+  if (val != buttonState) {
+    if (val == LOW) {
+      Serial.println("Button - low");
+      Serial.println(String(val));
+      manualFeed(2000);
+    } else {
+      Serial.println("Button - high");
+      Serial.println(String(val));
+    }
+  }
+
+  buttonState = val;
+
   EthernetClient client = server.available();
   if (client) {
     boolean currentLineIsBlank = true;
@@ -207,34 +181,10 @@ void loop()
     }
   }
 
-  // Update RC data including seconds, minutes, etc.
-  rtc.update();
-  rtc.set24Hour();
-
   // Show the date and time unless there's an alert message
   if (alert == 0) {
     //showDateTime(lastSecond);
     showStatus(Ethernet.localIP());
   }
-
-  val = digitalRead(MOMENTARY_PIN);
-
-  if (val != buttonState) {
-    if (val == LOW) {
-      Serial.println("Button - low");
-      Serial.println(String(val));
-      manualFeed(2000);
-    } else {
-      Serial.println("Button - high");
-      Serial.println(String(val));
-    }
-  }
-
-  buttonState = val;
-
-
-  // Read the state of the SQW pin and show it on the
-  // pin 13 LED. (It should blink at 1Hz.)
-  digitalWrite(SQW_OUTPUT_PIN, digitalRead(SQW_INPUT_PIN));
 }
 

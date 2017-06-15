@@ -32,11 +32,6 @@ static int8_t lastSecond = -1;
 // State of the servo (0 = off, 1 = on)
 bool feeding = 0;
 
-// Set network connection details
-byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
-IPAddress ip(192, 168, 1, 66);
-EthernetServer server(3001);
-
 // Create servo
 Servo servo;
 
@@ -110,15 +105,6 @@ void showDateTime(int8_t lastSecond) {
   lcd.print(String(rtc.month()) + "/" + String(rtc.day()) + "/" + String(rtc.year()));
 }
 
-void showStatus(IPAddress ip) {
-  String address = String(ip[0]) + "." + String(ip[1]) + "." + String(ip[2]) + "." + String(ip[3]);
-  if (address != "0.0.0.0") {
-    displayTwoLineMessage("Connected", address);
-  } else {
-    displayTwoLineMessage("Not Connected!", "");
-  }
-}
-
 void setup()
 {
   // Initialize serial connection
@@ -142,80 +128,10 @@ void setup()
   rtc.writeSQW(SQW_SQUARE_1);
   rtc.autoTime();
 
-  // Initialize ethernet connection and start a server
-  Ethernet.begin(mac, ip);
-  Serial.println(Ethernet.localIP());
-  server.begin();
 }
 
 void loop()
 {
-  EthernetClient client = server.available();
-  if (client) {
-    boolean currentLineIsBlank = true;
-    String req_str = "";
-    String data = "";
-    StaticJsonBuffer<200> jsonBuffer;
-
-    while (client.connected()) {
-      while (client.available()) {
-        // Read the client request into a string
-        char c = client.read();
-        req_str += c;
-        Serial.write(c);
-
-        if (c == '\n' && currentLineIsBlank && req_str.startsWith("POST")) {
-          while (client.available()) {
-            // Read the request data into a string
-            char d = client.read();
-            data += d;
-            Serial.write(d);
-          }
-          Serial.write('\n');
-
-          // Create a parsable JSON object
-          JsonObject& root = jsonBuffer.parseObject(data);
-          //const char* portionSize = root["portionSize"];
-          int portionSize = root["portionSize"];
-
-          // Manual feed with prespecified portion size (really a delay between start and stop of the auger)
-          manualFeed(portionSize);
-
-          // Send a response to the client
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-Type: application/json");
-          client.println();
-          client.println("{\"result\":\"success\"}");
-          client.stop();
-        } else if (c == '\n' && currentLineIsBlank && !req_str.startsWith("POST")) {
-          while (client.available()) {
-            Serial.write(client.read());
-          }
-          client.println("HTTP/1.1 404 NOT FOUND");
-          client.println("Content-Type: text/html");
-          client.println();
-          client.println("<HTML><BODY>Page not found</BODY></HTML>");
-          client.stop();
-        }
-        else if (c == '\n') {
-          currentLineIsBlank = true;
-        }
-        else if (c != '\r') {
-          currentLineIsBlank = false;
-        }
-      }
-    }
-  }
-
-  // Update RC data including seconds, minutes, etc.
-  rtc.update();
-  rtc.set24Hour();
-
-  // Show the date and time unless there's an alert message
-  if (alert == 0) {
-    //showDateTime(lastSecond);
-    showStatus(Ethernet.localIP());
-  }
 
   val = digitalRead(MOMENTARY_PIN);
 
@@ -232,6 +148,9 @@ void loop()
 
   buttonState = val;
 
+  // Update RC data including seconds, minutes, etc.
+  rtc.update();
+  rtc.set24Hour();
 
   // Read the state of the SQW pin and show it on the
   // pin 13 LED. (It should blink at 1Hz.)
