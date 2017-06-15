@@ -5,7 +5,7 @@
 #include <EthernetUdpV2_0.h>         // UDP library from: bjoern@cs.stanford.edu 12/30/2008
 #include <SerLCD.h>
 #include <SoftwareSerial.h>
-#include <SparkFunDS1307RTC.h>
+#include <RTClib.h>
 #include <SPI.h>
 #include <Time.h>
 #include <TimerOne.h>
@@ -26,11 +26,11 @@ int buttonState, val;
 // Interrupt for alerts
 bool alert = 0;
 
-// Set a test value for the clock
-static int8_t lastSecond = -1;
+// Create clock
+RTC_DS1307 rtc;
 
-// State of the servo (0 = off, 1 = on)
-bool feeding = 0;
+// Define the days of the week
+char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
 // Set network connection details
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
@@ -43,104 +43,32 @@ Servo servo;
 // Initialize LCD
 serLCD lcd(5);
 
-void displayTwoLineMessage(String line1, String line2) {
-  lcd.selectLine(1);
-  lcd.clearLine(1);
-  lcd.print(line1);
-  lcd.selectLine(2);
-  lcd.clearLine(2);
-  lcd.print(line2);
-}
-
-void clearLCD() {
-  lcd.clearLine(1);
-  lcd.clearLine(2);
-}
-
-// Manually initiate a feed cycle using portionSize as the delay time
-void manualFeed(long portionSize) {
-  if (portionSize > 5000) {
-    portionSize = 5000;
-  }
-  alert = 1;
-
-  // Convert portionSize into a time in seconds
-  char buff[2];
-  sprintf(buff, "%.5ld", portionSize);
-  char withDot[3];
-  withDot[0] = buff[1];
-  withDot[1] = '.';
-  withDot[2] = buff[2];
-  withDot[3] = '\0';
-
-  displayTwoLineMessage("MANUAL FEED", "T:" + String(withDot) + "s");
-
-  servo.attach(SERVO_PIN);
-  servo.write(2000);
-  delay(portionSize);
-  servo.detach();
-
-  clearLCD();
-  alert = 0;
-}
-
-// Display the date and time on the LCD
-void showDateTime(int8_t lastSecond) {
-  if (rtc.second() != lastSecond) {
-    lcd.selectLine(1);
-    lcd.clearLine(1);
-    int adjustedHour = (rtc.hour() - 14 > 0 ? rtc.hour() - 14 : rtc.hour() + 10);
-    if (adjustedHour < 10) {
-      lcd.print(String("0"));
-    }
-    lcd.print(String(adjustedHour) + ":");
-    if (rtc.minute() < 10) {
-      lcd.print(String("0"));
-    }
-    lcd.print(String(rtc.minute()) + ":");
-    if (rtc.second() < 10) {
-      lcd.print(String("0"));
-    }
-    lcd.print(String(rtc.second()));
-    delay(1000);
-  }
-
-  lcd.selectLine(2);
-  lcd.clearLine(2);
-  lcd.print(String(rtc.month()) + "/" + String(rtc.day()) + "/" + String(rtc.year()));
-}
-
-void showStatus(IPAddress ip) {
-  String address = String(ip[0]) + "." + String(ip[1]) + "." + String(ip[2]) + "." + String(ip[3]);
-  if (address != "0.0.0.0") {
-    displayTwoLineMessage("Connected", address);
-  } else {
-    displayTwoLineMessage("Not Connected!", "");
-  }
-}
-
 void setup()
 {
   // Initialize serial connection
   Serial.begin(9600);
 
+  // Check for the DS1307
+  if (! rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    while (1);
+  }
+
   // Pull the momentary switch high
   pinMode(MOMENTARY_PIN, INPUT);
   digitalWrite(MOMENTARY_PIN, HIGH);
-
-  // Pull the ethernet shield SD card slot high
-  pinMode(SDCARD_CS, OUTPUT);
-  digitalWrite(SDCARD_CS, HIGH);
 
   // Set up the clock
   pinMode(SQW_INPUT_PIN, INPUT_PULLUP);
   pinMode(SQW_OUTPUT_PIN, OUTPUT);
   digitalWrite(SQW_OUTPUT_PIN, digitalRead(SQW_INPUT_PIN));
 
+  // Pull the ethernet shield SD card slot high
+  pinMode(SDCARD_CS, OUTPUT);
+  digitalWrite(SDCARD_CS, HIGH);
+
   // Initialize clock library
-  rtc.begin();
-  rtc.writeSQW(SQW_SQUARE_1);
-  rtc.autoTime();
+  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 
   // Initialize ethernet connection and start a server
   Ethernet.begin(mac, ip);
@@ -150,6 +78,7 @@ void setup()
 
 void loop()
 {
+  // Listen for and handle JSON requests
   EthernetClient client = server.available();
   if (client) {
     boolean currentLineIsBlank = true;
@@ -164,6 +93,8 @@ void loop()
         req_str += c;
         Serial.write(c);
 
+        // If the request is a POST request, parse the JSON data and
+        // react accordingly
         if (c == '\n' && currentLineIsBlank && req_str.startsWith("POST")) {
           while (client.available()) {
             // Read the request data into a string
@@ -207,18 +138,14 @@ void loop()
     }
   }
 
-  // Update RC data including seconds, minutes, etc.
-  rtc.update();
-  rtc.set24Hour();
-
   // Show the date and time unless there's an alert message
   if (alert == 0) {
-    //showDateTime(lastSecond);
+    //printDateTime();
     showStatus(Ethernet.localIP());
   }
 
+  // Read the momentary push button
   val = digitalRead(MOMENTARY_PIN);
-
   if (val != buttonState) {
     if (val == LOW) {
       Serial.println("Button - low");
@@ -229,12 +156,112 @@ void loop()
       Serial.println(String(val));
     }
   }
-
   buttonState = val;
+}
 
+// Write to both lines of the LCD
+void displayTwoLineMessage(String line1, String line2) {
+  lcd.selectLine(1);
+  lcd.clearLine(1);
+  lcd.print(line1);
+  lcd.selectLine(2);
+  lcd.clearLine(2);
+  lcd.print(line2);
+}
 
-  // Read the state of the SQW pin and show it on the
-  // pin 13 LED. (It should blink at 1Hz.)
-  digitalWrite(SQW_OUTPUT_PIN, digitalRead(SQW_INPUT_PIN));
+// Clear the LCD screen
+void clearLCD() {
+  lcd.clearLine(1);
+  lcd.clearLine(2);
+}
+
+// Manually initiate a feed cycle using portionSize as the delay time
+void manualFeed(long portionSize) {
+  if (portionSize > 5000) {
+    portionSize = 5000;
+  }
+  alert = 1;
+
+  // Convert portionSize into a time in seconds
+  char buff[2];
+  sprintf(buff, "%.5ld", portionSize);
+  char withDot[3];
+  withDot[0] = buff[1];
+  withDot[1] = '.';
+  withDot[2] = buff[2];
+  withDot[3] = '\0';
+
+  displayTwoLineMessage("MANUAL FEED", "T:" + String(withDot) + "s");
+
+  servo.attach(SERVO_PIN);
+  servo.write(2000);
+  delay(portionSize);
+  servo.detach();
+
+  clearLCD();
+  alert = 0;
+}
+
+// Print the date and time to the serial monitor
+void printDateTime() {
+  DateTime now = rtc.now();
+  Serial.print(now.year(), DEC);
+  Serial.print('/');
+  Serial.print(now.month(), DEC);
+  Serial.print('/');
+  Serial.print(now.day(), DEC);
+  Serial.print(" (");
+  Serial.print(daysOfTheWeek[now.dayOfTheWeek()]);
+  Serial.print(") ");
+  Serial.print(now.hour(), DEC);
+  Serial.print(':');
+  Serial.print(now.minute(), DEC);
+  Serial.print(':');
+  Serial.print(now.second(), DEC);
+  Serial.println();
+
+  Serial.print(" since midnight 1/1/1970 = ");
+  Serial.print(now.unixtime());
+  Serial.print("s = ");
+  Serial.print(now.unixtime() / 86400L);
+  Serial.println("d");;
+  delay(1000);
+}
+
+// Display the date and time on the LCD
+//void showDateTime(int8_t lastSecond) {
+//  DateTime now = rtc.now();
+//  if (now.second() != lastSecond) {
+//    lcd.selectLine(1);
+//    lcd.clearLine(1);
+//    int adjustedHour = (now.hour() - 14 > 0 ? now.hour() - 14 : now.hour() + 10);
+//    if (adjustedHour < 10) {
+//      lcd.print(String("0"));
+//    }
+//    lcd.print(String(adjustedHour) + ":");
+//    if (now.minute() < 10) {
+//      lcd.print(String("0"));
+//    }
+//    lcd.print(String(now.minute()) + ":");
+//    if (now.second() < 10) {
+//      lcd.print(String("0"));
+//    }
+//    lcd.print(String(now.second()));
+//    delay(1000);
+//  }
+//
+//  lcd.selectLine(2);
+//  lcd.clearLine(2);
+//  lcd.print(String(now.month()) + "/" + String(now.day()) + "/" + String(now.year()));
+//}
+
+// Print the IP address (if connected) to the LCD screen
+void showStatus(IPAddress ip) {
+  String address = String(ip[0]) + "." + String(ip[1]) + "." + String(ip[2]) + "." + String(ip[3]);
+  if (address != "0.0.0.0") {
+    displayTwoLineMessage("Connected", address);
+  } else {
+    displayTwoLineMessage("Not Connected!", "");
+  }
 }
 
