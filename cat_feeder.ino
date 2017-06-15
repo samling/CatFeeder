@@ -15,7 +15,7 @@
 
 #define SDCARD_CS 4
 
-#define MOMENTARY 11
+#define MOMENTARY 0
 
 #define SQW_INPUT_PIN A4   // Input pin to read SQW
 #define SQW_OUTPUT_PIN 13 // LED to indicate SQW's state
@@ -152,9 +152,15 @@ void loop()
        
    if (val != buttonState) {
        if (val == LOW) {
+           alert = 1;
            Serial.println("Button - low");
+           Serial.println(alert);
+           alert = 0;
        } else {
+           alert = 1;
            Serial.println("Button - high");
+           Serial.println(alert);
+           alert = 0;
        }
    }
    
