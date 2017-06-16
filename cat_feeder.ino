@@ -108,16 +108,16 @@ void loop()
           JsonObject& root = jsonBuffer.parseObject(data);
           //const char* portionSize = root["portionSize"];
           int portionSize = root["portionSize"];
-
-          // Manual feed with prespecified portion size (really a delay between start and stop of the auger)
-          manualFeed(portionSize);
-
+          
           // Send a response to the client
           client.println("HTTP/1.1 200 OK");
           client.println("Content-Type: application/json");
           client.println();
           client.println("{\"result\":\"success\"}");
           client.stop();
+
+          // Manual feed with prespecified portion size (really a delay between start and stop of the auger)
+          manualFeed(portionSize);
         } else if (c == '\n' && currentLineIsBlank && !req_str.startsWith("POST")) {
           while (client.available()) {
             Serial.write(client.read());
