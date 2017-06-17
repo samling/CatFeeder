@@ -194,7 +194,7 @@ void manualFeed(long portionSize) {
   displayTwoLineMessage("MANUAL FEED", "T:" + String(withDot) + "s");
 
   servo.attach(SERVO_PIN);
-  servo.write(2000);
+  servo.write(-2000); // Going in the clockwise direction
   delay(portionSize);
   servo.detach();
 
