@@ -9,7 +9,7 @@
 
 #define PRINT_USA_DATE
 
-#define LCD_PIN D2 // 5v or 3.3v?
+#define LCD_PIN D2
 #define MOMENTARY_PIN D3
 #define SERVO_PIN D1
 
@@ -22,7 +22,7 @@ bool alert = 0;
 // Connect to wifi
 const char* ssid = "ssid";
 const char* password = "password";
-WiFiServer server(80);
+WiFiServer server(8080);
 
 // Create servo
 Servo servo;
@@ -38,15 +38,16 @@ void setup()
   lcd.setBrightness(30);
 
   // Connect to wifi
-  WiFi.begin(ssid, password);
+  WiFi.begin("2Bros1Cat", "0liverWorldwide");
 
- while (WiFi.status() != WL_CONNECTED) {
-  delay(500);
-  Serial.print(".");
- }
- Serial.println("");
- Serial.println("Server started");
- Serial.print(WiFi.localIP());
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  server.begin();
+  Serial.println("");
+  Serial.println("Server started");
+  Serial.print(WiFi.localIP());
   
   // Pull the momentary switch high
   pinMode(MOMENTARY_PIN, INPUT);
@@ -54,12 +55,7 @@ void setup()
 }
 
 void loop()
-{
-  WiFiClient client = server.available();
-  if (!client) {
-    return;
-  }
-  
+{ 
   // Read the momentary push button
   val = digitalRead(MOMENTARY_PIN);
   if (val != buttonState) {
@@ -73,6 +69,28 @@ void loop()
     }
   }
   buttonState = val;
+
+  // Check if a client has connected
+  WiFiClient client = server.available();
+  if (!client) {
+    return;
+  }
+
+  Serial.println("Client connected");
+
+  String request = client.readStringUntil('\r');
+  Serial.println(request);
+  client.flush();
+
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-Type: text/html");
+  client.println("");
+  client.println("<!DOCTYPE HTML>");
+  client.println("<html>OK</html>");
+  delay(1);
+
+  Serial.println("Client disconnected");
+  Serial.println("");
 }
 
 // Write to both lines of the LCD
