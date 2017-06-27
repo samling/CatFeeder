@@ -62,9 +62,15 @@ void setup()
   delay(500);
   lcd.setBrightness(30);
 
+  // Set sane feeding time defaults
+  timer1.setTime(5000, 7, 0);
+  timer2.setTime(5000, 16, 0);
+
   // Show defaults
   Serial.println("");
   Serial.println("Timers:");
+  Serial.println("Timer1: " + (timer1.hour() < 10 ? "0" + String(timer1.hour()) : String(timer1.hour())) + ":" + (timer1.minute() < 10 ? "0" + String(timer1.minute()) : String(timer1.minute())) + ", Portion Size: " + String(timer1.portionSize())); 
+  Serial.println("Timer2: " + (timer2.hour() < 10 ? "0" + String(timer2.hour()) : String(timer2.hour())) + ":" + (timer2.minute() < 10 ? "0" + String(timer2.minute()) : String(timer2.minute())) + ", Portion Size: " + String(timer2.portionSize())); 
 
   // Connect to wifi
   Serial.println("");
@@ -74,6 +80,7 @@ void setup()
     delay(500);
     Serial.print(".");
   }
+  Serial.println("");
   Serial.println("Wifi connected!");
   server.begin();
   Serial.println("");
@@ -84,7 +91,7 @@ void setup()
   Serial.println("");
   Serial.println("Starting UDP");
   udp.begin(udpPort);
-  Serial.print("Local port: ");
+  Serial.print("Local UDP port: ");
   Serial.println(udp.localPort());
 
   // Sync the clock via NTP
@@ -92,6 +99,8 @@ void setup()
   Serial.println("Synchronizing clock");
   setSyncProvider(getNtpTime);
   setSyncInterval(300);
+  Serial.println("Time set to: " + (hour() < 10 ? "0" + String(hour()) : String(hour())) + ":" + (minute() < 10 ? "0" + String(minute()) : String(minute())) + ":" + (second() < 10 ? "0" + String(second()) : String(second())));
+  Serial.println("Date set to: " + (day() < 10 ? "0" + String(day()) : String(day())) + "/" + (month() < 10 ? "0" + String(month()) : String(month())) + "/" + (year() < 10 ? "0" + String(year()) : String(year())));
 
   // Pull the momentary switch high
   pinMode(MOMENTARY_PIN, INPUT);
@@ -99,6 +108,10 @@ void setup()
 
   // Clear the LCD
   clearLCD();
+
+  // Startup complete
+  Serial.println("");
+  Serial.println("Startup complete!");
 }
 
 // ----------------------------//
@@ -195,12 +208,13 @@ time_t getNtpTime()
   IPAddress ntpServerIP; // NTP server's ip address
 
   while (udp.parsePacket() > 0) ; // discard any previously received packets
-  Serial.println("Transmit NTP Request");
+  Serial.println("Transmitting NTP Request...");
   // get a random server from the pool
   WiFi.hostByName(ntpServerName, ntpServerIP);
-  Serial.print(ntpServerName);
-  Serial.print(": ");
+  Serial.println("NTP Server: " + String(ntpServerName));
+  Serial.print("NTP Server IP: ");
   Serial.println(ntpServerIP);
+  Serial.print("");
   sendNTPpacket(ntpServerIP);
   uint32_t beginWait = millis();
   while (millis() - beginWait < 1500) {
@@ -217,7 +231,7 @@ time_t getNtpTime()
       return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
     }
   }
-  Serial.println("No NTP Response");
+  Serial.println("ERROR: No NTP Response");
   return 0; // return 0 if unable to get the time
 }
 
@@ -255,9 +269,9 @@ void printTime()
   displayTwoLineMessage(DD + "/" + MM + "/" + YY + " 1)" + (timer1.hour() < 10 ? "0" + String(timer1.hour()) : String(timer1.hour())) + ":" + (timer1.minute() < 10 ? "0" + String(timer1.minute()) : String(timer1.minute())), hh + ":" + mm + ":" + ss + " 2)" + (timer2.hour() < 10 ? "0" + String(timer2.hour()) : String(timer2.hour())) + ":" + (timer2.minute() < 10 ? "0" + String(timer2.minute()) : String(timer2.minute())));
 
   // Detect changes in the FSR
-  fsrReading = analogRead(FSR_PIN);
-  //Serial.print("Pressure: ");
-  //Serial.println(fsrReading);
+//  fsrReading = analogRead(FSR_PIN);
+//  Serial.print("Pressure: ");
+//  Serial.println(fsrReading);
 }
 
 // Write to both lines of the LCD
