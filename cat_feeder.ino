@@ -7,19 +7,23 @@
 #include <TimeLib.h>
 #include <WiFiUdp.h>
 #include <Wire.h>
+#include <FeedTimer.h>
 
-#define PRINT_USA_DATE
-
+#define FSR_PIN 0
+#define SERVO_PIN D1
 #define LCD_PIN D2
 #define MOMENTARY_PIN D3
-#define SERVO_PIN D1
-#define FSR_PIN 0
 
 // Button states for momentary switch
-int buttonState, val;
+int buttonState;
+int val;
 
 // Interrupt for alerts
 bool alert = 0;
+
+// Feed timers
+FeedTimer timer1;
+FeedTimer timer2;
 
 // FSR
 int fsrReading;
@@ -41,10 +45,10 @@ const char* ssid = "ssid";
 const char* password = "password";
 WiFiServer server(8080);
 
-// Create servo
+// Servo
 Servo servo;
 
-// Initialize LCD
+// LCD
 serLCD lcd(LCD_PIN);
 
 // ----------------------------//
@@ -58,20 +62,26 @@ void setup()
   delay(500);
   lcd.setBrightness(30);
 
+  // Show defaults
+  Serial.println("");
+  Serial.println("Timers:");
+
   // Connect to wifi
+  Serial.println("");
+  Serial.print("Connecting to wifi");
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("");
-  Serial.println("Wifi connected");
+  Serial.print("wifi connected!");
   server.begin();
   Serial.println("");
   Serial.println("Server started");
   Serial.print(WiFi.localIP());
 
   // Start listening for UDP packets
+  Serial.println("");
   Serial.println("Starting UDP");
   udp.begin(udpPort);
   Serial.print("Local port: ");
@@ -106,9 +116,9 @@ void loop()
   }
   buttonState = val;
 
-  // Print the current time to the serial monitor
+  // Print the current time to the LCD
   if (timeStatus() != timeNotSet) {
-    if (now() != prevDisplay) { //update the display only if time has changed
+    if (now() != prevDisplay) { // Update the display only if time has changed
       prevDisplay = now();
       printTime();
     }
@@ -120,7 +130,7 @@ void loop()
     return;
   }
   Serial.println("+---------------------+");
-  Serial.println("|  Client connected   |");
+  Serial.println("|   Client connected  |");
   Serial.println("+---------------------+");
 
   // Wait until the client is available
@@ -129,12 +139,33 @@ void loop()
   }
 
   // Read the request
-  //String request = client.readString();
+  String data = "";
   String json = "";
   boolean httpBody = false;
   client.find("{");
-  json = client.readStringUntil('}');
-  Serial.println("{" + json + "}");
+  data = client.readStringUntil('}');
+  json = "{" + data + "}";
+
+  // Parse the JSON data
+  StaticJsonBuffer<200> jsonBuffer;
+  JsonObject& root = jsonBuffer.parseObject(json);
+  String action = root["action"];
+  int portionSize = root["portionSize"];
+  
+  if (action == "feed") {
+    // Issue the manual feed command
+    manualFeed(portionSize);
+  } else if (action == "setTime") {
+    int timer = root["timer"];
+    int h = root["h"];
+    int m = root["m"];
+
+    if (timer == 1) {
+      timer1.setTime(portionSize, h, m);
+    } else if (timer == 2) {
+      timer2.setTime(portionSize, h, m);
+    }
+  }
 
   // Send response
   client.println("HTTP/1.1 200 OK");
@@ -211,13 +242,13 @@ unsigned long sendNTPpacket(IPAddress& address) {
 void printTime()
 {
   // digital clock display of the time
-  String YY = String(year());
+  String YY = String(year()).substring(2);
   String MM = (month() < 10 ? "0" + String(month()) : String(month()));
   String DD = (day() < 10 ? "0" + String(day()) : String(day()));
   String hh = String(hour());
   String mm = (minute() < 10 ? "0" + String(minute()) : String(minute()));
   String ss = (second() < 10 ? "0" + String(second()) : String(second()));
-  displayTwoLineMessage(DD + "/" + MM + "/" + YY, hh + ":" + mm + ":" + ss);
+  displayTwoLineMessage(DD + "/" + MM + "/" + YY + " 1)" + (timer1.hour() < 10 ? "0" + String(timer1.hour()) : String(timer1.hour())) + ":" + (timer1.minute() < 10 ? "0" + String(timer1.minute()) : String(timer1.minute())), hh + ":" + mm + ":" + ss + " 2)" + (timer2.hour() < 10 ? "0" + String(timer2.hour()) : String(timer2.hour())) + ":" + (timer2.minute() < 10 ? "0" + String(timer2.minute()) : String(timer2.minute())));
 
   // Detect changes in the FSR
   fsrReading = analogRead(FSR_PIN);
@@ -257,7 +288,7 @@ void manualFeed(long portionSize) {
   withDot[2] = buff[2];
   withDot[3] = '\0';
 
-  displayTwoLineMessage("MANUAL FEED", "T:" + String(portionSize) + "s");
+  displayTwoLineMessage("MANUAL FEED", "T:" + String(portionSize) + "ms");
 
   servo.attach(SERVO_PIN);
   servo.write(1000); // Going in the clockwise direction
