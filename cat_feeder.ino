@@ -4,7 +4,8 @@
 #include <SerLCD.h>
 #include <SoftwareSerial.h>
 #include <SPI.h>
-#include <Time.h>
+#include <TimeLib.h>
+#include <WiFiUdp.h>
 #include <Wire.h>
 
 #define PRINT_USA_DATE
@@ -12,6 +13,7 @@
 #define LCD_PIN D2
 #define MOMENTARY_PIN D3
 #define SERVO_PIN D1
+#define FSR_PIN 0
 
 // Button states for momentary switch
 int buttonState, val;
@@ -19,7 +21,22 @@ int buttonState, val;
 // Interrupt for alerts
 bool alert = 0;
 
-// Connect to wifi
+// FSR
+int fsrReading;
+
+// NTP
+unsigned int udpPort = 2390;
+IPAddress ntpIP;
+const char* ntpServerName = "time.google.com";
+const int NTP_PACKET_SIZE = 48;
+byte packetBuffer[NTP_PACKET_SIZE];
+WiFiUDP udp;
+time_t getNtpTime();
+time_t prevDisplay = 0;
+const int timeZone = -7;
+
+// Internet
+const unsigned long HTTP_TIMEOUT = 10000;
 const char* ssid = "ssid";
 const char* password = "password";
 WiFiServer server(8080);
@@ -30,6 +47,10 @@ Servo servo;
 // Initialize LCD
 serLCD lcd(LCD_PIN);
 
+// ----------------------------//
+//            Setup            //
+//-----------------------------//
+
 void setup()
 {
   // Initialize serial connection
@@ -38,59 +59,170 @@ void setup()
   lcd.setBrightness(30);
 
   // Connect to wifi
-  WiFi.begin("2Bros1Cat", "0liverWorldwide");
-
+  WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
+  Serial.println("");
+  Serial.println("Wifi connected");
   server.begin();
   Serial.println("");
   Serial.println("Server started");
   Serial.print(WiFi.localIP());
-  
+
+  // Start listening for UDP packets
+  Serial.println("Starting UDP");
+  udp.begin(udpPort);
+  Serial.print("Local port: ");
+  Serial.println(udp.localPort());
+
+  // Sync the clock via NTP
+  Serial.println("");
+  Serial.println("Synchronizing clock");
+  setSyncProvider(getNtpTime);
+  setSyncInterval(300);
+
   // Pull the momentary switch high
   pinMode(MOMENTARY_PIN, INPUT);
   digitalWrite(MOMENTARY_PIN, HIGH);
+
+  // Clear the LCD
+  clearLCD();
 }
 
+// ----------------------------//
+//          Main Loop          //
+//-----------------------------//
+
 void loop()
-{ 
+{
   // Read the momentary push button
   val = digitalRead(MOMENTARY_PIN);
   if (val != buttonState) {
     if (val == LOW) {
-      Serial.println("Button - low");
-      Serial.println(String(val));
       manualFeed(2000);
-    } else {
-      Serial.println("Button - high");
-      Serial.println(String(val));
     }
   }
   buttonState = val;
+
+  // Print the current time to the serial monitor
+  if (timeStatus() != timeNotSet) {
+    if (now() != prevDisplay) { //update the display only if time has changed
+      prevDisplay = now();
+      printTime();
+    }
+  }
 
   // Check if a client has connected
   WiFiClient client = server.available();
   if (!client) {
     return;
   }
+  Serial.println("+---------------------+");
+  Serial.println("|  Client connected   |");
+  Serial.println("+---------------------+");
 
-  Serial.println("Client connected");
+  // Wait until the client is available
+  while(!client.available()) {
+    delay(1);
+  }
 
-  String request = client.readStringUntil('\r');
-  Serial.println(request);
-  client.flush();
+  // Read the request
+  //String request = client.readString();
+  String json = "";
+  boolean httpBody = false;
+  client.find("{");
+  json = client.readStringUntil('}');
+  Serial.println("{" + json + "}");
 
+  // Send response
   client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html");
-  client.println("");
-  client.println("<!DOCTYPE HTML>");
-  client.println("<html>OK</html>");
-  delay(1);
+  client.println("Content-Type: application/json");
+  client.println();
+  client.println("{\"result\":\"success\"}");
 
-  Serial.println("Client disconnected");
+  // Clear the buffer
+  client.flush();
+  Serial.println("+---------------------+");
+  Serial.println("| Client disconnected |");
+  Serial.println("+---------------------+");
   Serial.println("");
+}
+
+// ----------------------------//
+//       Helper Functions      //
+//-----------------------------//
+
+// Get the time from an NTP time server
+time_t getNtpTime()
+{
+  IPAddress ntpServerIP; // NTP server's ip address
+
+  while (udp.parsePacket() > 0) ; // discard any previously received packets
+  Serial.println("Transmit NTP Request");
+  // get a random server from the pool
+  WiFi.hostByName(ntpServerName, ntpServerIP);
+  Serial.print(ntpServerName);
+  Serial.print(": ");
+  Serial.println(ntpServerIP);
+  sendNTPpacket(ntpServerIP);
+  uint32_t beginWait = millis();
+  while (millis() - beginWait < 1500) {
+    int size = udp.parsePacket();
+    if (size >= NTP_PACKET_SIZE) {
+      Serial.println("Received NTP Response");
+      udp.read(packetBuffer, NTP_PACKET_SIZE);  // read packet into the buffer
+      unsigned long secsSince1900;
+      // convert four bytes starting at location 40 to a long integer
+      secsSince1900 =  (unsigned long)packetBuffer[40] << 24;
+      secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
+      secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
+      secsSince1900 |= (unsigned long)packetBuffer[43];
+      return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
+    }
+  }
+  Serial.println("No NTP Response");
+  return 0; // return 0 if unable to get the time
+}
+
+// Send an NTP packet
+unsigned long sendNTPpacket(IPAddress& address) {
+  Serial.println("Sending NTP packet...");
+  // Set all bytes in the buffer to 0
+  memset(packetBuffer, 0, NTP_PACKET_SIZE);
+  // Initialize NTP request values
+  packetBuffer[0] = 0b11100011; // LI, Version, Mode
+  packetBuffer[1] = 0;          // Stratum (type of clock)
+  packetBuffer[2] = 6;          // Polling interval
+  packetBuffer[3] = 0xEC;       // Peer clock precision
+  // 8 bytes of zero for root delay and root dispersion
+  packetBuffer[12] = 49;
+  packetBuffer[13] = 0x4E;
+  packetBuffer[14] = 49;
+  packetBuffer[15] = 52;
+
+  udp.beginPacket(address, 123);
+  udp.write(packetBuffer, NTP_PACKET_SIZE);
+  udp.endPacket();
+}
+
+// Print the time to the LCD
+void printTime()
+{
+  // digital clock display of the time
+  String YY = String(year());
+  String MM = (month() < 10 ? "0" + String(month()) : String(month()));
+  String DD = (day() < 10 ? "0" + String(day()) : String(day()));
+  String hh = String(hour());
+  String mm = (minute() < 10 ? "0" + String(minute()) : String(minute()));
+  String ss = (second() < 10 ? "0" + String(second()) : String(second()));
+  displayTwoLineMessage(DD + "/" + MM + "/" + YY, hh + ":" + mm + ":" + ss);
+
+  // Detect changes in the FSR
+  fsrReading = analogRead(FSR_PIN);
+  //Serial.print("Pressure: ");
+  //Serial.println(fsrReading);
 }
 
 // Write to both lines of the LCD
@@ -135,57 +267,4 @@ void manualFeed(long portionSize) {
   clearLCD();
   alert = 0;
 }
-//
-//// Print the date and time to the serial monitor
-//void printDateTime() {
-//  DateTime now = rtc.now();
-//  Serial.print(now.year(), DEC);
-//  Serial.print('/');
-//  Serial.print(now.month(), DEC);
-//  Serial.print('/');
-//  Serial.print(now.day(), DEC);
-//  Serial.print(" (");
-//  Serial.print(daysOfTheWeek[now.dayOfTheWeek()]);
-//  Serial.print(") ");
-//  Serial.print(now.hour(), DEC);
-//  Serial.print(':');
-//  Serial.print(now.minute(), DEC);
-//  Serial.print(':');
-//  Serial.print(now.second(), DEC);
-//  Serial.println();
-//
-//  Serial.print(" since midnight 1/1/1970 = ");
-//  Serial.print(now.unixtime());
-//  Serial.print("s = ");
-//  Serial.print(now.unixtime() / 86400L);
-//  Serial.println("d");;
-//  delay(1000);
-//}
-
-// Display the date and time on the LCD
-//void showDateTime(int8_t lastSecond) {
-//  DateTime now = rtc.now();
-//  if (now.second() != lastSecond) {
-//    lcd.selectLine(1);
-//    lcd.clearLine(1);
-//    int adjustedHour = (now.hour() - 14 > 0 ? now.hour() - 14 : now.hour() + 10);
-//    if (adjustedHour < 10) {
-//      lcd.print(String("0"));
-//    }
-//    lcd.print(String(adjustedHour) + ":");
-//    if (now.minute() < 10) {
-//      lcd.print(String("0"));
-//    }
-//    lcd.print(String(now.minute()) + ":");
-//    if (now.second() < 10) {
-//      lcd.print(String("0"));
-//    }
-//    lcd.print(String(now.second()));
-//    delay(1000);
-//  }
-//
-//  lcd.selectLine(2);
-//  lcd.clearLine(2);
-//  lcd.print(String(now.month()) + "/" + String(now.day()) + "/" + String(now.year()));
-//}
 
