@@ -7,7 +7,7 @@
 #include <TimeLib.h>
 #include <WiFiUdp.h>
 #include <Wire.h>
-#include <FeedTimer.h>
+#include "FeedTimer.h"
 
 #define FSR_PIN 0
 #define SERVO_PIN D1
@@ -74,7 +74,7 @@ void setup()
     delay(500);
     Serial.print(".");
   }
-  Serial.print("wifi connected!");
+  Serial.println("Wifi connected!");
   server.begin();
   Serial.println("");
   Serial.println("Server started");
@@ -111,7 +111,7 @@ void loop()
   val = digitalRead(MOMENTARY_PIN);
   if (val != buttonState) {
     if (val == LOW) {
-      manualFeed(2000);
+      feed("manualFeed", 2000);
     }
   }
   buttonState = val;
@@ -123,6 +123,9 @@ void loop()
       printTime();
     }
   }
+
+  // Check if the current time matches a feed time
+  checkFeedTimes();
 
   // Check if a client has connected
   WiFiClient client = server.available();
@@ -151,10 +154,11 @@ void loop()
   JsonObject& root = jsonBuffer.parseObject(json);
   String action = root["action"];
   int portionSize = root["portionSize"];
-  
-  if (action == "feed") {
+
+  // Do something depending on the request type
+  if (action == "manualFeed") {
     // Issue the manual feed command
-    manualFeed(portionSize);
+    feed(action, portionSize);
   } else if (action == "setTime") {
     int timer = root["timer"];
     int h = root["h"];
@@ -245,7 +249,7 @@ void printTime()
   String YY = String(year()).substring(2);
   String MM = (month() < 10 ? "0" + String(month()) : String(month()));
   String DD = (day() < 10 ? "0" + String(day()) : String(day()));
-  String hh = String(hour());
+  String hh = (hour() < 10 ? "0" + String(hour()) : String(hour()));
   String mm = (minute() < 10 ? "0" + String(minute()) : String(minute()));
   String ss = (second() < 10 ? "0" + String(second()) : String(second()));
   displayTwoLineMessage(DD + "/" + MM + "/" + YY + " 1)" + (timer1.hour() < 10 ? "0" + String(timer1.hour()) : String(timer1.hour())) + ":" + (timer1.minute() < 10 ? "0" + String(timer1.minute()) : String(timer1.minute())), hh + ":" + mm + ":" + ss + " 2)" + (timer2.hour() < 10 ? "0" + String(timer2.hour()) : String(timer2.hour())) + ":" + (timer2.minute() < 10 ? "0" + String(timer2.minute()) : String(timer2.minute())));
@@ -272,24 +276,47 @@ void clearLCD() {
   lcd.clearLine(2);
 }
 
-// Manually initiate a feed cycle using portionSize as the delay time
-void manualFeed(long portionSize) {
+// Check the time against our preset feed times and trigger a feed cycle if they match
+void checkFeedTimes() {
+  if (second() == 0 && (timer1.hour() == hour() && timer1.minute() == minute())) {
+    feed("scheduledFeed", timer1.portionSize());
+    delay(1000);
+  } else if (second() == 0 && (timer2.hour() == hour() && timer2.minute() == minute())) {
+    feed("scheduledFeed", timer2.portionSize());
+    delay(1000);
+  }
+}
+
+// Initiate a feed cycle using portionSize as the delay time
+void feed(String action, long portionSize) {
+  // Limit duration to 5s maximum
   if (portionSize > 5000) {
     portionSize = 5000;
   }
-  alert = 1;
 
+  // Tailor the display to the action
+  String displayAction;
+  if (action == "manualFeed") {
+    displayAction = "MANUAL FEED";
+  } else if (action = "scheduledFeed") {
+    displayAction = "SCHEDULED FEED";
+  }
+  // Pause the clock to show the alert
+  alert = 1;
+  
   // Convert portionSize into a time in seconds
-  char buff[2];
-  sprintf(buff, "%.5Lu", portionSize);
+  char buff[3];
+  sprintf(buff, "%d", portionSize);
   char withDot[3];
-  withDot[0] = buff[1];
+  withDot[0] = buff[0];
   withDot[1] = '.';
-  withDot[2] = buff[2];
+  withDot[2] = buff[1];
   withDot[3] = '\0';
 
-  displayTwoLineMessage("MANUAL FEED", "T:" + String(portionSize) + "ms");
+  // Display a notification on the LCD
+  displayTwoLineMessage(displayAction, "T:" + String(withDot) + "s" + " @ " + (hour() < 10 ? "0" + String(hour()) : String(hour())) + ":" + (minute() < 10 ? "0" + String(minute()) : String(minute())));
 
+  // Spin the auger
   servo.attach(SERVO_PIN);
   servo.write(1000); // Going in the clockwise direction
   delay(portionSize);
