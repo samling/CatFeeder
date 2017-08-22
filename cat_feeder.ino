@@ -10,9 +10,20 @@
 #include "FeedTimer.h"
 
 #define FSR_PIN 0
-#define SERVO_PIN D1
+//#define SERVO_PIN D1
 #define LCD_PIN D2
 #define MOMENTARY_PIN D3
+
+// Stepper motor
+#define stp D1
+#define dir D4
+#define MS1 D5
+#define MS2 D6
+#define EN  D7
+char user_input;
+int x;
+int y;
+int state;
 
 // Button states for momentary switch
 int buttonState;
@@ -41,12 +52,9 @@ const int timeZone = -7;
 
 // Internet
 const unsigned long HTTP_TIMEOUT = 10000;
-const char* ssid = "ssid";
-const char* password = "password";
+const char* ssid = "2Bros1Cat-MikroTik";
+const char* password = "0liverWorldwide";
 WiFiServer server(8080);
-
-// Servo
-Servo servo;
 
 // LCD
 serLCD lcd(LCD_PIN);
@@ -63,8 +71,8 @@ void setup()
   lcd.setBrightness(30);
 
   // Set sane feeding time defaults
-  timer1.setTime(5000, 7, 0);
-  timer2.setTime(5000, 16, 0);
+  timer1.setTime(1, 7, 0);
+  timer2.setTime(1, 16, 0);
 
   // Show defaults
   Serial.println("");
@@ -106,6 +114,14 @@ void setup()
   pinMode(MOMENTARY_PIN, INPUT);
   digitalWrite(MOMENTARY_PIN, HIGH);
 
+  // Set output mode on stepper motor
+  pinMode(stp, OUTPUT);
+  pinMode(dir, OUTPUT);
+  pinMode(MS1, OUTPUT);
+  pinMode(MS2, OUTPUT);
+  pinMode(EN, OUTPUT);
+  resetEDPins(); //Set step, direction, microstep and enable pins to default states
+
   // Clear the LCD
   clearLCD();
 
@@ -124,7 +140,7 @@ void loop()
   val = digitalRead(MOMENTARY_PIN);
   if (val != buttonState) {
     if (val == LOW) {
-      feed("manualFeed", 2000);
+      feed("manualFeed", 2);
     }
   }
   buttonState = val;
@@ -161,6 +177,7 @@ void loop()
   client.find("{");
   data = client.readStringUntil('}');
   json = "{" + data + "}";
+  Serial.println(json);
 
   // Parse the JSON data
   StaticJsonBuffer<200> jsonBuffer;
@@ -201,6 +218,29 @@ void loop()
 // ----------------------------//
 //       Helper Functions      //
 //-----------------------------//
+
+//Default microstep mode function
+void StepForwardDefault(long milli)
+{
+  digitalWrite(dir, HIGH); //Pull direction pin low to move "forward"
+  for(x= 1; x<milli; x++)  //Loop the forward stepping enough times for motion to be visible
+  {
+    digitalWrite(stp,HIGH); //Trigger one step forward
+    delay(1);
+    digitalWrite(stp,LOW); //Pull step pin low so it can be triggered again
+    delay(1);
+  }
+}
+
+//Reset Easy Driver pins to default states
+void resetEDPins()
+{
+  digitalWrite(stp, LOW);
+  digitalWrite(dir, HIGH);
+  digitalWrite(MS1, LOW);
+  digitalWrite(MS2, LOW);
+  digitalWrite(EN, LOW);
+}
 
 // Get the time from an NTP time server
 time_t getNtpTime()
@@ -304,8 +344,8 @@ void checkFeedTimes() {
 // Initiate a feed cycle using portionSize as the delay time
 void feed(String action, long portionSize) {
   // Limit duration to 5s maximum
-  if (portionSize > 5000) {
-    portionSize = 5000;
+  if (portionSize > 5) {
+    portionSize = 5;
   }
 
   // Tailor the display to the action
@@ -328,13 +368,15 @@ void feed(String action, long portionSize) {
   withDot[3] = '\0';
 
   // Display a notification on the LCD
-  displayTwoLineMessage(displayAction, "T:" + String(withDot) + "s" + " @ " + (hour() < 10 ? "0" + String(hour()) : String(hour())) + ":" + (minute() < 10 ? "0" + String(minute()) : String(minute())));
+  //displayTwoLineMessage(displayAction, "T:" + String(withDot) + "s" + " @ " + (hour() < 10 ? "0" + String(hour()) : String(hour())) + ":" + (minute() < 10 ? "0" + String(minute()) : String(minute())));
+  displayTwoLineMessage(displayAction, "T:" + String(portionSize) + "s" + " @ " + (hour() < 10 ? "0" + String(hour()) : String(hour())) + ":" + (minute() < 10 ? "0" + String(minute()) : String(minute())));
 
   // Spin the auger
-  servo.attach(SERVO_PIN);
-  servo.write(1000); // Going in the clockwise direction
-  delay(portionSize);
-  servo.detach();
+  StepForwardDefault(portionSize*500);
+  //servo.attach(SERVO_PIN);
+  //servo.write(1000); // Going in the clockwise direction
+  //delay(portionSize);
+  //servo.detach();
 
   clearLCD();
   alert = 0;
